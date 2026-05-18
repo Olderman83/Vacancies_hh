@@ -1,89 +1,177 @@
-# main.py
-from config import DB_CONFIG
-from hh_api import HeadHunterAPI
-from db_manager import DBManager
+"""Главный модуль программы для сбора и анализа вакансий."""
+from hh_api import HeadHunterAPI, PREDEFINED_COMPANIES
+from db_manager import DBManager, create_database_if_not_exists
 
 
-def main():
+def load_vacancies_to_db() -> None:
+    """Загрузка данных о компаниях и вакансиях в базу данных."""
     print("=" * 60)
-    print("ПАРСЕР ВАКАНСИЙ С HEADHUNTER.RU")
-    print("=" * 60)
-
-    # 1. Получение данных через API
-    print("\n1. Загрузка данных с hh.ru...")
-    hh_api = HeadHunterAPI()
-
-    # Получаем данные о работодателях
-    employers_data = hh_api.get_all_employers_data()
-    print(f"\nЗагружено данных о {len(employers_data)} компаниях")
-
-    # Получаем данные о вакансиях для каждого работодателя
-    all_vacancies = []
-    for employer in employers_data:
-        vacancies = hh_api.get_all_vacancies_data(
-            employer['employer_id'],
-            employer['employer_name']
-        )
-        all_vacancies.extend(vacancies)
-
-    print(f"\nВсего загружено вакансий: {len(all_vacancies)}")
-
-    # 2. Создание таблиц и загрузка данных в БД
-    print("\n2. Загрузка данных в PostgreSQL...")
-    db_manager = DBManager(DB_CONFIG)
-
-    # Создаем таблицы
-    db_manager.create_tables()
-
-    # Вставляем данные
-    db_manager.insert_employers(employers_data)
-    db_manager.insert_vacancies(all_vacancies)
-
-    # 3. Демонстрация работы методов DBManager
-    print("\n" + "=" * 60)
-    print("3. Анализ данных")
+    print("НАЧАЛО ЗАГРУЗКИ ДАННЫХ О ВАКАНСИЯХ")
     print("=" * 60)
 
-    # Компании и количество вакансий
-    print("\n--- Компании и количество вакансий ---")
-    companies_vacancies = db_manager.get_companies_and_vacancies_count()
-    for item in companies_vacancies:
-        print(f"  {item['employer_name']}: {item['vacancies_count']} вакансий")
+    # Создание БД и таблиц
+    print("\n1. Подготовка базы данных...")
+    create_database_if_not_exists()
 
-    # Все вакансии
-    print("\n--- Все вакансии (первые 10) ---")
-    all_vacancies_list = db_manager.get_all_vacancies()
-    for i, vac in enumerate(all_vacancies_list[:10], 1):
-        print(f"  {i}. {vac['employer_name']} - {vac['vacancy_name']}")
-        print(f"     Зарплата: {vac['salary_from']} - {vac['salary_to']} {vac['salary_currency']}")
-        print(f"     Ссылка: {vac['url']}\n")
+    db_manager = DBManager()
 
-    # Средняя зарплата
-    print("\n--- Средняя зарплата по всем вакансиям ---")
-    avg_salary = db_manager.get_avg_salary()
-    print(f"  Средняя зарплата: {avg_salary:.2f} руб.")
+    try:
+        print("\n2. Создание таблиц...")
+        db_manager.create_tables()
 
-    # Вакансии с зарплатой выше средней
-    print("\n--- Вакансии с зарплатой выше средней (первые 10) ---")
-    high_salary_vacancies = db_manager.get_vacancies_with_higher_salary()
-    for i, vac in enumerate(high_salary_vacancies[:10], 1):
-        avg_vac_salary = (vac['salary_from'] or 0 + vac['salary_to'] or 0) / 2
-        print(f"  {i}. {vac['employer_name']} - {vac['vacancy_name']}")
-        print(f"     Зарплата: {vac['salary_from']} - {vac['salary_to']} {vac['salary_currency']} (ср: {avg_vac_salary:.2f})")
+        # Получение данных через API
+        print("\n3. Загрузка данных через API hh.ru...")
+        hh_api = HeadHunterAPI()
+        companies_data = hh_api.get_companies_vacancies(PREDEFINED_COMPANIES)
 
-    # Поиск по ключевому слову
-    print("\n--- Поиск вакансий по ключевому слову 'python' ---")
-    keyword_vacancies = db_manager.get_vacancies_with_keyword('python')
-    for i, vac in enumerate(keyword_vacancies[:10], 1):
-        print(f"  {i}. {vac['employer_name']} - {vac['vacancy_name']}")
-        print(f"     Ссылка: {vac['url']}")
+        # Заполнение таблиц
+        print("\n4. Заполнение таблиц данными...")
+        employers_count = 0
+        vacancies_count = 0
 
-    # Закрываем соединение
-    db_manager.close()
+        for company_id, data in companies_data.items():
+            company_info = data.get('company_info')
+            vacancies = data.get('vacancies', [])
 
-    print("\n" + "=" * 60)
-    print("ГОТОВО!")
-    print("=" * 60)
+            if company_info:
+                db_manager.insert_employer(company_info)
+                employers_count += 1
+
+                for vacancy in vacancies:
+                    db_manager.insert_vacancy(vacancy, company_id)
+                    vacancies_count += 1
+
+        print(f"\nЗагрузка завершена!")
+        print(f"- Загружено компаний: {employers_count}")
+        print(f"- Загружено вакансий: {vacancies_count}")
+
+    finally:
+        db_manager.close()
+
+
+def display_vacancies(vacancies: list, title: str, limit: int = 20) -> None:
+    """
+    Отображение списка вакансий в удобном формате.
+
+    Args:
+        vacancies: Список вакансий
+        title: Заголовок
+        limit: Максимальное количество для отображения
+    """
+    print(f"\n{title}")
+    print("-" * 80)
+
+    if not vacancies:
+        print("Нет данных для отображения")
+        return
+
+    for i, vac in enumerate(vacancies[:limit], 1):
+        company = vac[0]
+        name = vac[1]
+        salary_from = vac[2] if len(vac) > 2 else None
+        salary_to = vac[3] if len(vac) > 3 else None
+        currency = vac[4] if len(vac) > 4 else "RUR"
+        url = vac[5] if len(vac) > 5 else ""
+
+        salary_str = f"от {salary_from}" if salary_from else ""
+        if salary_to:
+            salary_str += f" до {salary_to}" if salary_str else f"до {salary_to}"
+        salary_str = salary_str or "не указана"
+
+        print(f"{i}. {company} - {name}")
+        print(f"   Зарплата: {salary_str} {currency}")
+        print(f"   Ссылка: {url}")
+        print()
+
+    if len(vacancies) > limit:
+        print(f"... и еще {len(vacancies) - limit} вакансий")
+
+
+def interactive_mode(db_manager: DBManager) -> None:
+    """
+    Интерактивный режим работы с базой данных.
+
+    Args:
+        db_manager: Экземпляр DBManager
+    """
+    while True:
+        print("\n" + "=" * 60)
+        print("СИСТЕМА АНАЛИЗА ВАКАНСИЙ")
+        print("=" * 60)
+        print("\nВыберите действие:")
+        print("1. Список компаний и количество их вакансий")
+        print("2. Список всех вакансий")
+        print("3. Средняя зарплата по всем вакансиям")
+        print("4. Вакансии с зарплатой выше средней")
+        print("5. Поиск вакансий по ключевому слову")
+        print("0. Выход")
+
+        choice = input("\nВаш выбор: ").strip()
+
+        if choice == "0":
+            print("До свидания!")
+            break
+
+        elif choice == "1":
+            result = db_manager.get_companies_and_vacancies_count()
+            print("\nКОМПАНИИ И КОЛИЧЕСТВО ВАКАНСИЙ")
+            print("-" * 50)
+            for company, count in result:
+                print(f"• {company}: {count} вакансий")
+
+        elif choice == "2":
+            result = db_manager.get_all_vacancies()
+            display_vacancies(result, "ВСЕ ВАКАНСИИ")
+
+        elif choice == "3":
+            avg_salary = db_manager.get_avg_salary()
+            print(f"\nСРЕДНЯЯ ЗАРПЛАТА")
+            print("-" * 50)
+            if avg_salary:
+                print(f"Средняя зарплата по всем вакансиям: {avg_salary:.2f} RUR")
+            else:
+                print("Недостаточно данных для расчета средней зарплаты")
+
+        elif choice == "4":
+            result = db_manager.get_vacancies_with_higher_salary()
+            avg_salary = db_manager.get_avg_salary()
+            print(f"\nВАКАНСИИ С ЗАРПЛАТОЙ ВЫШЕ СРЕДНЕЙ ({avg_salary:.2f} RUR)")
+            display_vacancies(result, "")
+
+        elif choice == "5":
+            keyword = input("Введите ключевое слово для поиска: ").strip()
+            if keyword:
+                result = db_manager.get_vacancies_with_keyword(keyword)
+                display_vacancies(result, f"ВАКАНСИИ, СОДЕРЖАЩИЕ '{keyword}'")
+            else:
+                print("Ключевое слово не может быть пустым")
+
+        else:
+            print("Неверный выбор. Пожалуйста, выберите от 0 до 5.")
+
+
+def main() -> None:
+    """Главная функция программы."""
+    try:
+        # Загрузка данных в БД
+        load_vacancies_to_db()
+
+        # Интерактивный режим
+        print("\n" + "=" * 60)
+        print("ПЕРЕХОД В ИНТЕРАКТИВНЫЙ РЕЖИМ")
+        print("=" * 60)
+
+        db_manager = DBManager()
+        try:
+            interactive_mode(db_manager)
+        finally:
+            db_manager.close()
+
+    except KeyboardInterrupt:
+        print("\n\nПрограмма прервана пользователем")
+    except Exception as e:
+        print(f"\nПроизошла ошибка: {e}")
+        raise
 
 
 if __name__ == "__main__":
