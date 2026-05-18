@@ -1,229 +1,89 @@
-"""Главный модуль для запуска парсера hh.ru и взаимодействия с БД."""
-import sys
-from typing import Dict, List, Any
-
-from config import DatabaseConfig, EMPLOYERS
-from hh_api import HHAPI
+# main.py
+from config import DB_CONFIG
+from hh_api import HeadHunterAPI
 from db_manager import DBManager
 
 
-def format_salary(salary_from: int, salary_to: int, currency: str) -> str:
-    """
-    Форматировать вывод зарплаты.
-
-    Args:
-        salary_from: Нижняя граница
-        salary_to: Верхняя граница
-        currency: Валюта
-
-    Returns:
-        Отформатированная строка зарплаты
-    """
-    if salary_from and salary_to:
-        return f"{salary_from:,} - {salary_to:,} {currency}".replace(",", " ")
-    elif salary_from:
-        return f"от {salary_from:,} {currency}".replace(",", " ")
-    elif salary_to:
-        return f"до {salary_to:,} {currency}".replace(",", " ")
-    return "Не указана"
-
-
-def display_companies_and_vacancies(db_manager: DBManager) -> None:
-    """Отобразить компании и количество вакансий."""
-    print("\n" + "=" * 60)
-    print("КОМПАНИИ И КОЛИЧЕСТВО ВАКАНСИЙ")
+def main():
+    print("=" * 60)
+    print("ПАРСЕР ВАКАНСИЙ С HEADHUNTER.RU")
     print("=" * 60)
 
-    results = db_manager.get_companies_and_vacancies_count()
-    for item in results:
-        print(f"📢 {item['company_name']}: {item['vacancies_count']} вакансий")
+    # 1. Получение данных через API
+    print("\n1. Загрузка данных с hh.ru...")
+    hh_api = HeadHunterAPI()
 
+    # Получаем данные о работодателях
+    employers_data = hh_api.get_all_employers_data()
+    print(f"\nЗагружено данных о {len(employers_data)} компаниях")
 
-def display_all_vacancies(db_manager: DBManager) -> None:
-    """Отобразить все вакансии."""
-    print("\n" + "=" * 60)
-    print("ВСЕ ВАКАНСИИ")
-    print("=" * 60)
-
-    vacancies = db_manager.get_all_vacancies()
-    for vac in vacancies:
-        salary = format_salary(vac['salary_from'], vac['salary_to'], vac['currency'] or 'RUR')
-        print(f"\n🏢 {vac['company_name']}")
-        print(f"📌 {vac['vacancy_name']}")
-        print(f"💰 {salary}")
-        print(f"📍 {vac['city']}")
-        print(f"🔗 {vac['url']}")
-        print("-" * 40)
-
-
-def display_avg_salary(db_manager: DBManager) -> None:
-    """Отобразить среднюю зарплату."""
-    print("\n" + "=" * 60)
-    print("СРЕДНЯЯ ЗАРПЛАТА ПО ВСЕМ ВАКАНСИЯМ")
-    print("=" * 60)
-
-    avg_salary = db_manager.get_avg_salary()
-    print(f"💰 Средняя зарплата: {avg_salary:,.0f} RUR".replace(",", " "))
-
-
-def display_higher_salary_vacancies(db_manager: DBManager) -> None:
-    """Отобразить вакансии с зарплатой выше средней."""
-    print("\n" + "=" * 60)
-    print("ВАКАНСИИ С ЗАРПЛАТОЙ ВЫШЕ СРЕДНЕЙ")
-    print("=" * 60)
-
-    vacancies = db_manager.get_vacancies_with_higher_salary()
-    avg_salary = db_manager.get_avg_salary()
-
-    print(f"Средняя зарплата: {avg_salary:,.0f} RUR".replace(",", " "))
-    print("-" * 40)
-
-    for vac in vacancies:
-        salary = format_salary(vac['salary_from'], vac['salary_to'], vac['currency'] or 'RUR')
-        print(f"\n🏢 {vac['company_name']}")
-        print(f"📌 {vac['vacancy_name']}")
-        print(f"💰 {salary} (средняя: {vac['avg_salary']:,} RUR)".replace(",", " "))
-        print(f"🔗 {vac['url']}")
-        print("-" * 40)
-
-
-def display_vacancies_by_keyword(db_manager: DBManager) -> None:
-    """Отобразить вакансии по ключевому слову."""
-    keyword = input("\nВведите ключевое слово для поиска: ").strip()
-
-    if not keyword:
-        print("Ключевое слово не может быть пустым!")
-        return
-
-    print("\n" + "=" * 60)
-    print(f"ВАКАНСИИ, СОДЕРЖАЩИЕ '{keyword}'")
-    print("=" * 60)
-
-    vacancies = db_manager.get_vacancies_with_keyword(keyword)
-
-    if not vacancies:
-        print(f"Вакансии, содержащие '{keyword}', не найдены")
-        return
-
-    for vac in vacancies:
-        salary = format_salary(vac['salary_from'], vac['salary_to'], vac['currency'] or 'RUR')
-        print(f"\n🏢 {vac['company_name']}")
-        print(f"📌 {vac['vacancy_name']}")
-        print(f"💰 {salary}")
-        print(f"📝 Требования: {vac['requirement'][:150] if vac['requirement'] else 'Не указаны'}...")
-        print(f"🔗 {vac['url']}")
-        print("-" * 40)
-
-
-def load_data_from_api() -> None:
-    """Загрузить данные из API hh.ru и сохранить в БД."""
-    print("Начало загрузки данных с hh.ru...")
-
-    # Получаем данные через API
-    api = HHAPI()
-    all_vacancies = api.get_all_vacancies()
-
-    # Подготовка данных для БД
-    employers_data = []
-    vacancies_data = []
-
-    for employer in EMPLOYERS:
-        employers_data.append({
-            "employer_id": employer["id"],
-            "name": employer["name"],
-            "url": f"https://hh.ru/employer/{employer['id']}",
-            "trusted": True
-        })
-
-    for employer_name, vacancies in all_vacancies.items():
-        employer_id = next(
-            (e["id"] for e in EMPLOYERS if e["name"] == employer_name),
-            None
+    # Получаем данные о вакансиях для каждого работодателя
+    all_vacancies = []
+    for employer in employers_data:
+        vacancies = hh_api.get_all_vacancies_data(
+            employer['employer_id'],
+            employer['employer_name']
         )
-        if employer_id:
-            for vacancy in vacancies:
-                parsed = api.parse_vacancy(vacancy, employer_name)
-                parsed["employer_id"] = employer_id
-                vacancies_data.append(parsed)
+        all_vacancies.extend(vacancies)
 
-    # Сохраняем в БД
-    config = DatabaseConfig()
-    with DBManager(config) as db:
-        db.create_database()
-        db.connect()
-        db.create_tables()
-        db.insert_employers(employers_data)
-        db.insert_vacancies(vacancies_data)
+    print(f"\nВсего загружено вакансий: {len(all_vacancies)}")
 
-    print(f"\nЗагрузка завершена. Получено {len(vacancies_data)} вакансий")
+    # 2. Создание таблиц и загрузка данных в БД
+    print("\n2. Загрузка данных в PostgreSQL...")
+    db_manager = DBManager(DB_CONFIG)
 
+    # Создаем таблицы
+    db_manager.create_tables()
 
-def interactive_menu() -> None:
-    """Интерактивное меню для работы с БД."""
-    config = DatabaseConfig()
+    # Вставляем данные
+    db_manager.insert_employers(employers_data)
+    db_manager.insert_vacancies(all_vacancies)
 
-    with DBManager(config) as db:
-        db.create_database()
-        db.connect()
-        db.create_tables()
+    # 3. Демонстрация работы методов DBManager
+    print("\n" + "=" * 60)
+    print("3. Анализ данных")
+    print("=" * 60)
 
-        while True:
-            print("\n" + "=" * 60)
-            print("СИСТЕМА УПРАВЛЕНИЯ ВАКАНСИЯМИ")
-            print("=" * 60)
-            print("1. Показать компании и количество вакансий")
-            print("2. Показать все вакансии")
-            print("3. Показать среднюю зарплату")
-            print("4. Показать вакансии с зарплатой выше средней")
-            print("5. Поиск вакансий по ключевому слову")
-            print("0. Выход")
-            print("=" * 60)
+    # Компании и количество вакансий
+    print("\n--- Компании и количество вакансий ---")
+    companies_vacancies = db_manager.get_companies_and_vacancies_count()
+    for item in companies_vacancies:
+        print(f"  {item['employer_name']}: {item['vacancies_count']} вакансий")
 
-            choice = input("\nВыберите действие: ").strip()
+    # Все вакансии
+    print("\n--- Все вакансии (первые 10) ---")
+    all_vacancies_list = db_manager.get_all_vacancies()
+    for i, vac in enumerate(all_vacancies_list[:10], 1):
+        print(f"  {i}. {vac['employer_name']} - {vac['vacancy_name']}")
+        print(f"     Зарплата: {vac['salary_from']} - {vac['salary_to']} {vac['salary_currency']}")
+        print(f"     Ссылка: {vac['url']}\n")
 
-            if choice == "1":
-                display_companies_and_vacancies(db)
-            elif choice == "2":
-                display_all_vacancies(db)
-            elif choice == "3":
-                display_avg_salary(db)
-            elif choice == "4":
-                display_higher_salary_vacancies(db)
-            elif choice == "5":
-                display_vacancies_by_keyword(db)
-            elif choice == "0":
-                print("До свидания!")
-                break
-            else:
-                print("Неверный выбор. Пожалуйста, попробуйте снова.")
+    # Средняя зарплата
+    print("\n--- Средняя зарплата по всем вакансиям ---")
+    avg_salary = db_manager.get_avg_salary()
+    print(f"  Средняя зарплата: {avg_salary:.2f} руб.")
 
+    # Вакансии с зарплатой выше средней
+    print("\n--- Вакансии с зарплатой выше средней (первые 10) ---")
+    high_salary_vacancies = db_manager.get_vacancies_with_higher_salary()
+    for i, vac in enumerate(high_salary_vacancies[:10], 1):
+        avg_vac_salary = (vac['salary_from'] or 0 + vac['salary_to'] or 0) / 2
+        print(f"  {i}. {vac['employer_name']} - {vac['vacancy_name']}")
+        print(f"     Зарплата: {vac['salary_from']} - {vac['salary_to']} {vac['salary_currency']} (ср: {avg_vac_salary:.2f})")
 
-def main() -> None:
-    """Главная функция."""
-    print("Добро пожаловать в парсер вакансий hh.ru!")
-    print("\nВыберите режим работы:")
-    print("1. Загрузить данные с hh.ru (требуется интернет)")
-    print("2. Работать с существующей базой данных")
-    print("3. Использовать тестовые данные (без API)")
+    # Поиск по ключевому слову
+    print("\n--- Поиск вакансий по ключевому слову 'python' ---")
+    keyword_vacancies = db_manager.get_vacancies_with_keyword('python')
+    for i, vac in enumerate(keyword_vacancies[:10], 1):
+        print(f"  {i}. {vac['employer_name']} - {vac['vacancy_name']}")
+        print(f"     Ссылка: {vac['url']}")
 
-    choice = input("\nВаш выбор (1/2/3): ").strip()
+    # Закрываем соединение
+    db_manager.close()
 
-    if choice == "1":
-        try:
-            load_data_from_api()
-            interactive_menu()
-        except Exception as e:
-            print(f"Ошибка при загрузке данных: {e}")
-            print("Попробуйте использовать режим с тестовыми данными или проверьте подключение")
-    elif choice == "2":
-        interactive_menu()
-    elif choice == "3":
-        print("Использование тестовых данных...")
-        # Здесь можно добавить загрузку mock-данных из предоставленного JSON
-        interactive_menu()
-    else:
-        print("Неверный выбор. Завершение программы.")
-        sys.exit(1)
+    print("\n" + "=" * 60)
+    print("ГОТОВО!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
