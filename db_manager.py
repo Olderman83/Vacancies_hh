@@ -1,4 +1,5 @@
 """Модуль для управления базой данных."""
+
 import psycopg2
 from psycopg2 import sql
 from typing import List, Dict, Any, Optional
@@ -13,19 +14,21 @@ class DBManager:
     и выполнения запросов к БД.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dbname: Optional[str] = None) -> None:
         """Инициализация DBManager с подключением к БД."""
         self.connection = None
+        self.dbname = dbname or Config.DB_NAME
         self.connect()
 
     def connect(self) -> None:
         """Установка соединения с базой данных."""
         try:
             params = Config.get_db_params()
+            params["dbname"] = self.dbname
             self.connection = psycopg2.connect(**params)
             self.connection.autocommit = False
         except Exception as e:
-            print(f'Ошибка подключения к БД: {e}')
+            print(f"Ошибка подключения к БД: {e}")
             raise
 
     def ensure_connection(self) -> None:
@@ -51,14 +54,14 @@ class DBManager:
             with self.connection.cursor() as cursor:
                 cursor.execute(query, params)
 
-                if query.strip().upper().startswith('SELECT'):
+                if query.strip().upper().startswith("SELECT"):
                     result = cursor.fetchall()
                 else:
                     self.connection.commit()
 
         except Exception as e:
             self.connection.rollback()
-            print(f'Ошибка выполнения запроса: {e}')
+            print(f"Ошибка выполнения запроса: {e}")
             raise
 
         return result
@@ -67,7 +70,7 @@ class DBManager:
         """Создание базы данных."""
         db_name = Config.DB_NAME
         params = Config.get_db_params()
-        params.pop('dbname')
+        params.pop("dbname", None)
 
         try:
             conn = psycopg2.connect(**params)
@@ -77,14 +80,14 @@ class DBManager:
                 cursor.execute(sql.SQL("SELECT 1 FROM pg_database WHERE datname = %s"), [db_name])
                 if not cursor.fetchone():
                     cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
-                    print(f'База данных {db_name} успешно создана')
+                    print(f"База данных {db_name} успешно создана")
                 else:
-                    print(f'База данных {db_name} уже существует')
+                    print(f"База данных {db_name} уже существует")
 
             conn.close()
 
         except Exception as e:
-            print(f'Ошибка создания базы данных: {e}')
+            print(f"Ошибка создания базы данных: {e}")
             raise
 
     def create_tables(self) -> None:
@@ -135,7 +138,7 @@ class DBManager:
         self.execute_query(create_employers_table)
         self.execute_query(create_vacancies_table)
         self.execute_query(create_indexes)
-        print('Таблицы успешно созданы')
+        print("Таблицы успешно созданы")
 
     def insert_employer(self, employer_data: Dict[str, Any]) -> None:
         """
@@ -154,10 +157,10 @@ class DBManager:
         """
 
         params = (
-            employer_data.get('id'),
-            employer_data.get('name'),
-            employer_data.get('alternate_url'),
-            employer_data.get('trusted', False)
+            employer_data.get("id"),
+            employer_data.get("name"),
+            employer_data.get("alternate_url"),
+            employer_data.get("trusted", False),
         )
 
         self.execute_query(query, params)
@@ -170,7 +173,7 @@ class DBManager:
             vacancy_data: Словарь с данными о вакансии
             employer_id: ID работодателя
         """
-        salary = vacancy_data.get('salary') or {}
+        salary = vacancy_data.get("salary") or {}
 
         query = """
         INSERT INTO vacancies (
@@ -187,23 +190,23 @@ class DBManager:
         """
 
         params = (
-            vacancy_data.get('id'),
+            vacancy_data.get("id"),
             employer_id,
-            vacancy_data.get('name'),
-            salary.get('from'),
-            salary.get('to'),
-            salary.get('currency'),
-            salary.get('gross'),
-            vacancy_data.get('area', {}).get('name'),
-            vacancy_data.get('experience', {}).get('name'),
-            vacancy_data.get('employment', {}).get('name'),
-            vacancy_data.get('schedule', {}).get('name'),
-            vacancy_data.get('snippet', {}).get('requirement'),
-            vacancy_data.get('snippet', {}).get('responsibility'),
-            vacancy_data.get('alternate_url'),
-            vacancy_data.get('published_at'),
-            vacancy_data.get('created_at'),
-            vacancy_data.get('archived', False)
+            vacancy_data.get("name"),
+            salary.get("from"),
+            salary.get("to"),
+            salary.get("currency"),
+            salary.get("gross"),
+            vacancy_data.get("area", {}).get("name"),
+            vacancy_data.get("experience", {}).get("name"),
+            vacancy_data.get("employment", {}).get("name"),
+            vacancy_data.get("schedule", {}).get("name"),
+            vacancy_data.get("snippet", {}).get("requirement"),
+            vacancy_data.get("snippet", {}).get("responsibility"),
+            vacancy_data.get("alternate_url"),
+            vacancy_data.get("published_at"),
+            vacancy_data.get("created_at"),
+            vacancy_data.get("archived", False),
         )
 
         self.execute_query(query, params)
@@ -227,6 +230,7 @@ class DBManager:
 
     def get_all_vacancies(self) -> List[tuple]:
         """
+
         Получение списка всех вакансий с информацией о компании.
 
         Returns:
@@ -244,7 +248,6 @@ class DBManager:
         JOIN employers e ON v.employer_id = e.employer_id
         ORDER BY e.name, v.name
         """
-
         return self.execute_query(query) or []
 
     def get_avg_salary(self) -> Optional[float]:
@@ -316,20 +319,20 @@ class DBManager:
         ORDER BY e.name, v.name
         """
 
-        return self.execute_query(query, (f'%{keyword}%',)) or []
+        return self.execute_query(query, (f"%{keyword}%",)) or []
 
     def close(self) -> None:
         """Закрытие соединения с БД."""
         if self.connection:
             self.connection.close()
-            print('Соединение с БД закрыто')
+            print("Соединение с БД закрыто")
 
 
 def create_database_if_not_exists() -> None:
     """Создание базы данных, если она не существует."""
     db_manager = None
     try:
-        db_manager = DBManager()
+        db_manager = DBManager(dbname="postgres")
         db_manager.create_database()
     finally:
         if db_manager:
