@@ -132,11 +132,15 @@ def interactive_mode(db_manager: DBManager) -> None:
             else:
                 print("Недостаточно данных для расчета средней зарплаты")
 
+
         elif choice == "4":
-            result = db_manager.get_vacancies_with_higher_salary()
             avg_salary = db_manager.get_avg_salary()
-            print(f"\nВАКАНСИИ С ЗАРПЛАТОЙ ВЫШЕ СРЕДНЕЙ ({avg_salary:.2f} RUR)")
-            display_vacancies(result, "")
+            if avg_salary is not None:
+                result = db_manager.get_vacancies_with_higher_salary()
+                print(f"\nВАКАНСИИ С ЗАРПЛАТОЙ ВЫШЕ СРЕДНЕЙ ({avg_salary:.2f} RUR)")
+                display_vacancies(result, "")
+            else:
+                print("\nНедостаточно данных для расчета средней зарплаты")
 
         elif choice == "5":
             keyword = input("Введите ключевое слово для поиска: ").strip()
